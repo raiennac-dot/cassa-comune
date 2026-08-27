@@ -21,6 +21,8 @@ import {
 
 const SUPABASE_URL = "https://utmjwdligttrhftpykfa.supabase.co";
 const SUPABASE_KEY = "sb_publishable_Ih1Ix68Z13mW5X_LUAgQFw_SXJQwBS_";
+const APP_VERSION = "1.0.0";
+const BUILD_DATE = "2026-08-27";
 
 const authHeaders = (token) => ({
   apikey: SUPABASE_KEY,
@@ -1966,42 +1968,16 @@ export default function CassaComuneLive() {
         {/* FOOTER */}
         {/* ========================================= */}
 
-        <div className="disclaimer">
+      <div className="disclaimer">
+  <strong>Cassa Comune</strong> {" · "}
+  Tutti i componenti partecipano alla votazione. {" · "}
+  Il controllo del saldo viene effettuato prima dell'invio della richiesta.
+  <div style={{ marginTop: 8, opacity: 0.6 }}>
+    v{APP_VERSION} · build {BUILD_DATE}
+  </div>
+</div>
 
-          <strong>
-            Cassa Comune
-          </strong>
-
-          {" · "}
-
-          Tutti i componenti partecipano
-          alla votazione.
-
-          {" · "}
-
-          Il controllo del saldo viene
-          effettuato prima dell'invio
-          della richiesta.
-
-        </div>
-
-      </div>
-
-      {toast && (
-
-        <div className="toast">
-
-          {toast}
-
-        </div>
-
-      )}
-
-    </div>
-
-  );
-}
-
+        
 // =====================================================
 // STILI
 // =====================================================
