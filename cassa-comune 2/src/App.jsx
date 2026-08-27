@@ -556,9 +556,17 @@ export default function CassaComuneLive() {
 
 const styles = `
   :root{
-    --ink:#10181A; --panel:#16211F; --panel-2:#1B2825; --parchment:#EDE6D6;
-    --muted:#9DAAA3; --line:#2B3A36; --brass:#C9A227; --brass-soft:#8C7A3B;
-    --ok:#5C9A76; --bad:#B5563B; --radius:10px;
+   --ink:#0B1220;
+  --panel:#121C2E;
+  --panel-2:#18243A;
+  --parchment:#F4F1E8;
+  --muted:#9BA8BA;
+  --line:#293750;
+  --brass:#D6B46A;
+  --brass-soft:#8F7848;
+  --ok:#55B88A;
+  --bad:#D0645B;
+  --radius:10px;
   }
   *{box-sizing:border-box;}
   .app{ min-height:100vh; background: radial-gradient(1200px 600px at 10% -10%, rgba(201,162,39,0.08), transparent 60%), var(--ink);
@@ -582,7 +590,7 @@ const styles = `
   .tab{ padding:8px 14px; border-radius:999px; border:1px solid var(--line); background:transparent; color:var(--muted);
     font-size:13px; cursor:pointer; display:flex; align-items:center; gap:6px; }
   .tab.active{ background:var(--panel-2); color:var(--brass); border-color:var(--brass-soft); }
-  .badge{ background:var(--brass); color:#1B140A; font-size:10.5px; font-weight:700; border-radius:999px; padding:1px 6px; margin-left:2px; }
+  .badge{ background:var(--brass); color:#0B1220; font-size:10.5px; font-weight:700; border-radius:999px; padding:1px 6px; margin-left:2px; }
   .card{ background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:18px 20px; margin-bottom:14px; }
   .req-top{ display:flex; justify-content:space-between; gap:14px; }
   .req-reason{ font-size:15px; font-weight:600; }
@@ -601,7 +609,7 @@ const styles = `
     font-size:13px; cursor:pointer; display:flex; align-items:center; gap:6px; }
   .btn.approve:hover{ border-color:var(--ok); color:var(--ok); }
   .btn.reject:hover{ border-color:var(--bad); color:var(--bad); }
-  .btn.primary{ background:var(--brass); color:#1B140A; border-color:var(--brass); font-weight:600; }
+  .btn.primary{ background:var(--brass); color:#0B1220; border-color:var(--brass); font-weight:600; }
   .btn:disabled{ opacity:0.5; cursor:not-allowed; }
   .voted-note{ font-size:12px; color:var(--muted); margin-top:12px; font-style:italic; }
   .stack{ display:flex; flex-direction:column; gap:12px; }
