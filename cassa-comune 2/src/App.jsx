@@ -19,8 +19,13 @@ import {
 // VERSIONE APP
 // =====================================================
 
-const APP_VERSION = "1.0.0";
+const APP_VERSION = "1.1.0";
 const BUILD_DATE = "2026-08-27";
+
+// Ore entro cui i componenti devono votare, altrimenti la richiesta scade
+const REQUEST_TTL_HOURS = 24;
+// Numero massimo di richieste aperte (in attesa, non scadute) per persona
+const MAX_OPEN_REQUESTS_PER_USER = 2;
 
 // =====================================================
 // CONFIGURAZIONE SUPABASE
@@ -285,9 +290,18 @@ export default function CassaComuneLive() {
       return;
     }
 
-    if (amt > balance) {
+    if (myOpenRequestsCount >= MAX_OPEN_REQUESTS_PER_USER) {
       setFormError(
-        `Fondi insufficienti. Saldo disponibile: ${currency(balance)}. Importo richiesto: ${currency(amt)}.`
+        `Hai già ${MAX_OPEN_REQUESTS_PER_USER} richieste aperte in attesa di voto. Attendi che vengano decise (o scadano) prima di inviarne un'altra.`
+      );
+      return;
+    }
+
+    if (amt > availableBalance) {
+      setFormError(
+        `Fondi insufficienti. Disponibile: ${currency(availableBalance)} (saldo ${currency(
+          balance
+        )} meno ${currency(lockedAmount)} già impegnati in richieste aperte). Importo richiesto: ${currency(amt)}.`
       );
       return;
     }
@@ -455,10 +469,41 @@ export default function CassaComuneLive() {
       status = "approved";
     }
 
-    return { status, votesByMember };
+    // Scadenza: se dopo REQUEST_TTL_HOURS non è ancora stata decisa, scade
+    // e libera il credito immobilizzato. Una volta approvata o respinta
+    // non scade più (la decisione è già presa).
+    let expired = false;
+    let hoursLeft = null;
+
+    if (status === "pending" && request.created_at) {
+      const createdMs = new Date(request.created_at).getTime();
+      const deadlineMs = createdMs + REQUEST_TTL_HOURS * 60 * 60 * 1000;
+      const msLeft = deadlineMs - Date.now();
+
+      if (msLeft <= 0) {
+        expired = true;
+        status = "expired";
+      } else {
+        hoursLeft = Math.ceil(msLeft / (60 * 60 * 1000));
+      }
+    }
+
+    return { status, votesByMember, expired, hoursLeft };
   }
 
-  const pendingCount = requests.filter((r) => computeStatus(r).status === "pending").length;
+  // Richieste ancora "vive": occupano credito e contano per il limite personale
+  const openRequests = requests.filter((r) => computeStatus(r).status === "pending");
+
+  const pendingCount = openRequests.length;
+
+  // Saldo realmente disponibile: saldo totale meno le richieste già impegnate
+  const lockedAmount = openRequests.reduce((sum, r) => sum + Number(r.amount || 0), 0);
+  const availableBalance = balance - lockedAmount;
+
+  // Quante richieste aperte ha già l'utente corrente
+  const myOpenRequestsCount = session
+    ? openRequests.filter((r) => r.requester_id === session.user.id).length
+    : 0;
 
   // ===================================================
   // LOGIN
@@ -593,10 +638,15 @@ export default function CassaComuneLive() {
           </div>
 
           <div className="balance-card">
-            <div className="balance-label">Saldo cassa comune</div>
-            <div className={`balance-amt mono ${balance <= 0 ? "balance-zero" : ""}`}>
-              {currency(balance)}
+            <div className="balance-label">Saldo disponibile</div>
+            <div className={`balance-amt mono ${availableBalance <= 0 ? "balance-zero" : ""}`}>
+              {currency(availableBalance)}
             </div>
+            {lockedAmount > 0 && (
+              <div className="sub" style={{ marginTop: 2 }}>
+                {currency(balance)} totale − {currency(lockedAmount)} impegnati
+              </div>
+            )}
             <input
               type="text"
               inputMode="decimal"
@@ -672,7 +722,7 @@ export default function CassaComuneLive() {
 
             {sorted.map((r) => {
               const requester = members.find((m) => m.id === r.requester_id);
-              const { status, votesByMember } = computeStatus(r);
+              const { status, votesByMember, hoursLeft } = computeStatus(r);
               const myVote = votesByMember[session.user.id];
 
               return (
@@ -689,10 +739,18 @@ export default function CassaComuneLive() {
                             ? "status-pending"
                             : status === "approved"
                             ? "status-approved"
+                            : status === "expired"
+                            ? "status-expired"
                             : "status-rejected"
                         }`}
                       >
-                        {status === "pending" ? "In attesa" : status === "approved" ? "Approvata" : "Respinta"}
+                        {status === "pending"
+                          ? `In attesa${hoursLeft ? ` · scade tra ${hoursLeft}h` : ""}`
+                          : status === "approved"
+                          ? "Approvata"
+                          : status === "expired"
+                          ? "Scaduta"
+                          : "Respinta"}
                       </span>
                     </div>
                     <div className="req-amount mono">{currency(r.amount)}</div>
@@ -745,6 +803,14 @@ export default function CassaComuneLive() {
                       La richiesta è stata respinta.
                     </div>
                   )}
+
+                  {status === "expired" && (
+                    <div className="rejected-message">
+                      <X size={15} />
+                      Richiesta scaduta dopo {REQUEST_TTL_HOURS} ore senza voto completo — il credito è
+                      stato liberato. Se serve ancora, invia una nuova richiesta.
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -757,10 +823,17 @@ export default function CassaComuneLive() {
             <div className="request-balance">
               <div>
                 <span>Disponibilità cassa</span>
-                <strong>{currency(balance)}</strong>
+                <strong>{currency(availableBalance)}</strong>
               </div>
               <Wallet size={22} />
             </div>
+
+            {myOpenRequestsCount > 0 && (
+              <div className="sub" style={{ marginBottom: 14 }}>
+                Hai {myOpenRequestsCount} di {MAX_OPEN_REQUESTS_PER_USER} richieste aperte in attesa di
+                voto.
+              </div>
+            )}
 
             <div className="stack">
               <label className="field">
@@ -1010,6 +1083,7 @@ nav.tabs, .tabs{ display:flex; gap:8px; margin-bottom:22px; flex-wrap:wrap; }
 .status-pending{ color:var(--brass); border-color:var(--brass-soft); }
 .status-approved{ color:var(--ok); border-color:var(--ok); }
 .status-rejected{ color:var(--bad); border-color:var(--bad); }
+.status-expired{ color:var(--muted); border-color:var(--line); }
 .stamps-row{ display:flex; gap:10px; margin-top:14px; flex-wrap:wrap; }
 .stamp{
   width:38px; height:38px; border-radius:50%; border:2px solid; display:flex; align-items:center;
