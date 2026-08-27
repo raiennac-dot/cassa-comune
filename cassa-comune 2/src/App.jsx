@@ -252,7 +252,7 @@ async function submitRequest() {
   const newEmail = inviteForm.email.trim().toLowerCase();
 
   try {
-    // 1. Crea l'account su Supabase Auth
+    // CREA ACCOUNT SUPABASE AUTH
     const authRes = await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
       method: "POST",
       headers: authHeaders(),
@@ -275,40 +275,44 @@ async function submitRequest() {
       );
     }
 
-    // 2. Recupera l'ID del nuovo utente
     const newUserId = authData.user?.id;
 
     if (!newUserId) {
       throw new Error(
-        "Account creato, ma non è stato restituito l'ID dell'utente."
+        "Supabase ha creato l'account ma non ha restituito l'ID dell'utente."
       );
     }
 
-    // 3. Salva il componente nella tabella members
-    const memberRes = await fetch(`${SUPABASE_URL}/rest/v1/members`, {
-      method: "POST",
-      headers: {
-        ...authHeaders(session.access_token),
-        Prefer: "return=representation",
-      },
-      body: JSON.stringify({
-        id: newUserId,
-        name: newName,
-        email: newEmail,
-        role: "member",
-      }),
-    });
+    // SALVA NOME + EMAIL + RUOLO IN MEMBERS
+    const memberRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/members`,
+      {
+        method: "POST",
+        headers: {
+          ...authHeaders(session.access_token),
+          Prefer: "return=representation",
+        },
+        body: JSON.stringify({
+          id: newUserId,
+          name: newName,
+          email: newEmail,
+          role: "member",
+        }),
+      }
+    );
+
+    const memberData = await memberRes.json();
 
     if (!memberRes.ok) {
-      const memberError = await memberRes.json();
-
       throw new Error(
-        memberError.message ||
-        "Account creato, ma errore nel salvataggio del componente."
+        memberData.message ||
+        memberData.hint ||
+        "Errore nel salvataggio del componente nella tabella members."
       );
     }
 
-    // 4. Pulizia del form
+    console.log("MEMBRO CREATO:", memberData);
+
     setInviteForm({
       name: "",
       email: "",
@@ -316,13 +320,13 @@ async function submitRequest() {
     });
 
     showToast(
-      `Componente ${newName} creato correttamente.`
+      `${newName} creato correttamente con email ${newEmail}.`
     );
 
-    // 5. Ricarica i componenti
-    loadData();
+    await loadData();
 
   } catch (err) {
+    console.error("ERRORE CREAZIONE MEMBRO:", err);
     setInviteError(
       err.message || "Errore nella creazione del componente."
     );
