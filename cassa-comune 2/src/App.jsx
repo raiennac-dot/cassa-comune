@@ -149,40 +149,60 @@ export default function CassaComuneLive() {
   }, [loadData]);
 
   // ---------- AZIONI ----------
-  async function submitRequest() {
-    const amt = parseFloat(String(form.amount).replace(",", "."));
-    if (!form.amount || isNaN(amt) || amt <= 0) {
-      setFormError("Inserisci un importo valido, maggiore di zero.");
-      return;
-    }
-    if (!form.reason.trim()) {
-      setFormError("Inserisci il motivo della spesa.");
-      return;
-    }
-    setFormError("");
-    try {
-      const res = await fetch(`${SUPABASE_URL}/rest/v1/requests`, {
-        method: "POST",
-        headers: { ...authHeaders(session.access_token), Prefer: "return=representation" },
-        body: JSON.stringify({
-          requester_id: session.user.id,
-          amount: amt,
-          reason: form.reason.trim(),
-          recipient: form.recipient.trim() || null,
-        }),
-      });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.message || "Errore nel salvataggio della richiesta.");
-      }
-      setForm({ amount: "", reason: "", recipient: "" });
-      setView("ledger");
-      showToast("Richiesta salvata e visibile a tutti i componenti.");
-      loadData();
-    } catch (err) {
-      setFormError(err.message);
-    }
+async function submitRequest() {
+  const amt = parseFloat(String(form.amount).replace(",", "."));
+
+  if (!form.amount || isNaN(amt) || amt <= 0) {
+    setFormError("Inserisci un importo valido, maggiore di zero.");
+    return;
   }
+
+  if (!form.reason.trim()) {
+    setFormError("Inserisci il motivo della spesa.");
+    return;
+  }
+
+  // Controllo disponibilità della Cassa Comune
+  if (amt > balance) {
+    setFormError(
+      `Fondi insufficienti. Saldo disponibile: ${currency(balance)}. Importo richiesto: ${currency(amt)}.`
+    );
+    return;
+  }
+
+  setFormError("");
+
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/requests`, {
+      method: "POST",
+      headers: {
+        ...authHeaders(session.access_token),
+        Prefer: "return=representation",
+      },
+      body: JSON.stringify({
+        requester_id: session.user.id,
+        amount: amt,
+        reason: form.reason.trim(),
+        recipient: form.recipient.trim() || null,
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(
+        err.message || "Errore nel salvataggio della richiesta."
+      );
+    }
+
+    setForm({ amount: "", reason: "", recipient: "" });
+    setView("ledger");
+    showToast("Richiesta salvata e visibile a tutti i componenti.");
+    loadData();
+
+  } catch (err) {
+    setFormError(err.message);
+  }
+}
 
   async function vote(requestId, choice) {
     try {
