@@ -226,42 +226,108 @@ async function submitRequest() {
     }
   }
 
-  async function addMember() {
-    if (!inviteForm.name.trim() || !inviteForm.email.trim() || !inviteForm.password) {
-      setInviteError("Inserisci nome, email e una password provvisoria.");
-      return;
-    }
-    if (inviteForm.password.length < 6) {
-      setInviteError("La password provvisoria deve avere almeno 6 caratteri.");
-      return;
-    }
-    if (members.length >= 10) {
-      setInviteError("Limite di 10 componenti raggiunto.");
-      return;
-    }
-    setInviteError("");
-    try {
-      // Nota: questa chiamata crea l'utente ma poi risulta collegata alla sessione
-      // dell'ultimo che si autentica; per inviti reali multi-utente in produzione
-      // servirebbe una funzione server-side dedicata (prossimo step).
-      const res = await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
-        method: "POST",
-        headers: authHeaders(),
-        body: JSON.stringify({
-          email: inviteForm.email.trim(),
-          password: inviteForm.password,
-          data: { name: inviteForm.name.trim() },
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.msg || data.error_description || "Errore nella creazione del componente.");
-      setInviteForm({ name: "", email: "", password: "" });
-      showToast(`Componente ${inviteForm.name.trim()} creato. Comunicagli email e password per l'accesso.`);
-      loadData();
-    } catch (err) {
-      setInviteError(err.message);
-    }
+ async function addMember() {
+  if (
+    !inviteForm.name.trim() ||
+    !inviteForm.email.trim() ||
+    !inviteForm.password
+  ) {
+    setInviteError("Inserisci nome, email e una password provvisoria.");
+    return;
   }
+
+  if (inviteForm.password.length < 6) {
+    setInviteError("La password provvisoria deve avere almeno 6 caratteri.");
+    return;
+  }
+
+  if (members.length >= 10) {
+    setInviteError("Limite di 10 componenti raggiunto.");
+    return;
+  }
+
+  setInviteError("");
+
+  const newName = inviteForm.name.trim();
+  const newEmail = inviteForm.email.trim().toLowerCase();
+
+  try {
+    // 1. Crea l'account su Supabase Auth
+    const authRes = await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        email: newEmail,
+        password: inviteForm.password,
+        data: {
+          name: newName,
+        },
+      }),
+    });
+
+    const authData = await authRes.json();
+
+    if (!authRes.ok) {
+      throw new Error(
+        authData.msg ||
+        authData.error_description ||
+        "Errore nella creazione dell'account."
+      );
+    }
+
+    // 2. Recupera l'ID del nuovo utente
+    const newUserId = authData.user?.id;
+
+    if (!newUserId) {
+      throw new Error(
+        "Account creato, ma non è stato restituito l'ID dell'utente."
+      );
+    }
+
+    // 3. Salva il componente nella tabella members
+    const memberRes = await fetch(`${SUPABASE_URL}/rest/v1/members`, {
+      method: "POST",
+      headers: {
+        ...authHeaders(session.access_token),
+        Prefer: "return=representation",
+      },
+      body: JSON.stringify({
+        id: newUserId,
+        name: newName,
+        email: newEmail,
+        role: "member",
+      }),
+    });
+
+    if (!memberRes.ok) {
+      const memberError = await memberRes.json();
+
+      throw new Error(
+        memberError.message ||
+        "Account creato, ma errore nel salvataggio del componente."
+      );
+    }
+
+    // 4. Pulizia del form
+    setInviteForm({
+      name: "",
+      email: "",
+      password: "",
+    });
+
+    showToast(
+      `Componente ${newName} creato correttamente.`
+    );
+
+    // 5. Ricarica i componenti
+    loadData();
+
+  } catch (err) {
+    setInviteError(
+      err.message || "Errore nella creazione del componente."
+    );
+  }
+}
 
   // ---------- HELPER: stato calcolato di una richiesta dai voti reali ----------
   function computeStatus(request) {
