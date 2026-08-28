@@ -21,8 +21,11 @@ import {
 // VERSIONE APP
 // =====================================================
 
-const APP_VERSION = "1.5.0";
+const APP_VERSION = "1.6.0";
 const BUILD_DATE = "2026-08-27";
+
+// Indirizzo pubblico del sito, usato nel link incluso nelle email di avviso
+const APP_URL = "https://cassa-comune1.vercel.app";
 
 // =====================================================
 // TEMPO DI SCADENZA RICHIESTE (per test veloci)
@@ -30,9 +33,7 @@ const BUILD_DATE = "2026-08-27";
 // Per provare velocemente la scadenza, cambia SOLO questa riga:
 // es. per testare con 30 secondi -> REQUEST_TTL_SECONDS = 30;
 // Per l'uso reale, rimettila a 24 ore -> REQUEST_TTL_SECONDS = 24 * 60 * 60;
-// const REQUEST_TTL_SECONDS = 24 * 60 * 60; // 24 ore
-
-const REQUEST_TTL_SECONDS = 60; // sec.
+const REQUEST_TTL_SECONDS = 60     //24 * 60 * 60; // 24 ore
 
 // Ogni quanti secondi il conto alla rovescia si aggiorna da solo a schermo
 // (non ricarica i dati dal database, ricalcola solo il tempo rimasto)
@@ -430,6 +431,30 @@ export default function CassaComuneLive() {
       setView("ledger");
       showToast("Richiesta salvata e visibile a tutti i componenti.");
       loadData();
+
+      // Avvisa via email gli altri componenti (non blocca l'app se fallisce:
+      // la richiesta resta comunque salvata anche se l'email non parte).
+      const recipients = members
+        .filter((m) => m.id !== session.user.id && m.email)
+        .map((m) => ({ name: m.name, email: m.email }));
+
+      if (recipients.length > 0) {
+        try {
+          await fetch(`${SUPABASE_URL}/functions/v1/notify-request`, {
+            method: "POST",
+            headers: authHeaders(session.access_token),
+            body: JSON.stringify({
+              members: recipients,
+              reason: form.reason.trim(),
+              amount: amt,
+              requesterName: currentMember?.name || session.user.email,
+              appUrl: APP_URL,
+            }),
+          });
+        } catch {
+          // Silenzioso: l'email è un avviso extra, non un requisito per usare l'app.
+        }
+      }
     } catch (err) {
       setFormError(err.message);
     }
