@@ -20,7 +20,7 @@ import {
 // VERSIONE APP
 // =====================================================
 
-const APP_VERSION = "1.3.1";
+const APP_VERSION = "1.3.2";
 const BUILD_DATE = "2026-08-27";
 
 // =====================================================
@@ -35,7 +35,7 @@ const REQUEST_TTL_SECONDS = 60; // sec
 
 // Ogni quanti secondi il conto alla rovescia si aggiorna da solo a schermo
 // (non ricarica i dati dal database, ricalcola solo il tempo rimasto)
-const COUNTDOWN_REFRESH_SECONDS = 5;
+const COUNTDOWN_REFRESH_SECONDS = 1;
 
 // Numero massimo di richieste aperte (in attesa, non scadute) per persona
 const MAX_OPEN_REQUESTS_PER_USER = 2;
