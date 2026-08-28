@@ -20,7 +20,7 @@ import {
 // VERSIONE APP
 // =====================================================
 
-const APP_VERSION = "1.2.1";
+const APP_VERSION = "1.3.0";
 const BUILD_DATE = "2026-08-27";
 
 // =====================================================
@@ -29,8 +29,12 @@ const BUILD_DATE = "2026-08-27";
 // Per provare velocemente la scadenza, cambia SOLO questa riga:
 // es. per testare con 30 secondi -> REQUEST_TTL_SECONDS = 30;
 // Per l'uso reale, rimettila a 24 ore -> REQUEST_TTL_SECONDS = 24 * 60 * 60;
-// const REQUEST_TTL_SECONDS = 24 * 60 * 60; // 24 ore
-const REQUEST_TTL_SECONDS = 60 ; // 1 minuto
+const REQUEST_TTL_SECONDS = 24 * 60 * 60; // 24 ore
+
+// Ogni quanti secondi il conto alla rovescia si aggiorna da solo a schermo
+// (non ricarica i dati dal database, ricalcola solo il tempo rimasto)
+const COUNTDOWN_REFRESH_SECONDS = 5;
+
 // Numero massimo di richieste aperte (in attesa, non scadute) per persona
 const MAX_OPEN_REQUESTS_PER_USER = 2;
 
@@ -125,6 +129,19 @@ export default function CassaComuneLive() {
   const [view, setView] = useState("ledger");
   const [toast, setToast] = useState(null);
   const [showArchived, setShowArchived] = useState(false);
+
+  // "Tick" che avanza ogni COUNTDOWN_REFRESH_SECONDS: non fa nulla da solo,
+  // serve solo a far ricalcolare il testo del conto alla rovescia senza
+  // dover ricaricare i dati dal database.
+  const [clockTick, setClockTick] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setClockTick((t) => t + 1);
+    }, COUNTDOWN_REFRESH_SECONDS * 1000);
+
+    return () => clearInterval(interval);
+  }, []);
 
   // ---------------------------------------------------
   // NUOVA RICHIESTA
