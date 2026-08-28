@@ -13,17 +13,24 @@ import {
   Phone,
   Mail,
   AlertCircle,
+  Archive,
 } from "lucide-react";
 
 // =====================================================
 // VERSIONE APP
 // =====================================================
 
-const APP_VERSION = "1.1.0";
+const APP_VERSION = "1.2.0";
 const BUILD_DATE = "2026-08-27";
 
-// Ore entro cui i componenti devono votare, altrimenti la richiesta scade
-const REQUEST_TTL_HOURS = 24;
+// =====================================================
+// TEMPO DI SCADENZA RICHIESTE (per test veloci)
+// =====================================================
+// Per provare velocemente la scadenza, cambia SOLO questa riga:
+// es. per testare con 30 secondi -> REQUEST_TTL_SECONDS = 30;
+// Per l'uso reale, rimettila a 24 ore -> REQUEST_TTL_SECONDS = 24 * 60 * 60;
+const REQUEST_TTL_SECONDS = 24 * 60 * 60; // 24 ore
+
 // Numero massimo di richieste aperte (in attesa, non scadute) per persona
 const MAX_OPEN_REQUESTS_PER_USER = 2;
 
@@ -117,6 +124,7 @@ export default function CassaComuneLive() {
 
   const [view, setView] = useState("ledger");
   const [toast, setToast] = useState(null);
+  const [showArchived, setShowArchived] = useState(false);
 
   // ---------------------------------------------------
   // NUOVA RICHIESTA
@@ -447,6 +455,30 @@ export default function CassaComuneLive() {
   }
 
   // ===================================================
+  // ARCHIVIA RICHIESTA
+  // ===================================================
+
+  async function archiveRequest(requestId) {
+    try {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/requests?id=eq.${requestId}`, {
+        method: "PATCH",
+        headers: { ...authHeaders(session.access_token), Prefer: "return=representation" },
+        body: JSON.stringify({ archived: true }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message || "Errore nell'archiviazione.");
+      }
+
+      showToast("Richiesta archiviata.");
+      loadData();
+    } catch (err) {
+      showToast(err.message);
+    }
+  }
+
+  // ===================================================
   // STATO RICHIESTA
   // ===================================================
 
@@ -469,26 +501,33 @@ export default function CassaComuneLive() {
       status = "approved";
     }
 
-    // Scadenza: se dopo REQUEST_TTL_HOURS non è ancora stata decisa, scade
+    // Scadenza: se dopo REQUEST_TTL_SECONDS non è ancora stata decisa, scade
     // e libera il credito immobilizzato. Una volta approvata o respinta
     // non scade più (la decisione è già presa).
     let expired = false;
-    let hoursLeft = null;
+    let timeLeftLabel = null;
 
     if (status === "pending" && request.created_at) {
       const createdMs = new Date(request.created_at).getTime();
-      const deadlineMs = createdMs + REQUEST_TTL_HOURS * 60 * 60 * 1000;
+      const deadlineMs = createdMs + REQUEST_TTL_SECONDS * 1000;
       const msLeft = deadlineMs - Date.now();
 
       if (msLeft <= 0) {
         expired = true;
         status = "expired";
       } else {
-        hoursLeft = Math.ceil(msLeft / (60 * 60 * 1000));
+        const secLeft = Math.ceil(msLeft / 1000);
+        if (secLeft < 60) {
+          timeLeftLabel = `${secLeft}s`;
+        } else if (secLeft < 3600) {
+          timeLeftLabel = `${Math.ceil(secLeft / 60)}min`;
+        } else {
+          timeLeftLabel = `${Math.ceil(secLeft / 3600)}h`;
+        }
       }
     }
 
-    return { status, votesByMember, expired, hoursLeft };
+    return { status, votesByMember, expired, timeLeftLabel };
   }
 
   // Richieste ancora "vive": occupano credito e contano per il limite personale
@@ -607,15 +646,17 @@ export default function CassaComuneLive() {
   // APP PRINCIPALE
   // ===================================================
 
-  const sorted = [...requests].sort((a, b) => {
-    const sa = computeStatus(a).status;
-    const sb = computeStatus(b).status;
+  const sorted = [...requests]
+    .filter((r) => (showArchived ? true : !r.archived))
+    .sort((a, b) => {
+      const sa = computeStatus(a).status;
+      const sb = computeStatus(b).status;
 
-    if (sa === "pending" && sb !== "pending") return -1;
-    if (sb === "pending" && sa !== "pending") return 1;
+      if (sa === "pending" && sb !== "pending") return -1;
+      if (sb === "pending" && sa !== "pending") return 1;
 
-    return (b.created_at || "").localeCompare(a.created_at || "");
-  });
+      return (b.created_at || "").localeCompare(a.created_at || "");
+    });
 
   return (
     <div className="app">
@@ -713,6 +754,13 @@ export default function CassaComuneLive() {
         {/* REGISTRO */}
         {view === "ledger" && (
           <div>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
+              <button className="btn" onClick={() => setShowArchived(!showArchived)}>
+                <Archive size={13} />
+                {showArchived ? "Nascondi archiviate" : "Mostra archiviate"}
+              </button>
+            </div>
+
             {sorted.length === 0 && (
               <div className="empty">
                 <Wallet size={30} style={{ opacity: 0.4, marginBottom: 10 }} />
@@ -722,8 +770,9 @@ export default function CassaComuneLive() {
 
             {sorted.map((r) => {
               const requester = members.find((m) => m.id === r.requester_id);
-              const { status, votesByMember, hoursLeft } = computeStatus(r);
+              const { status, votesByMember, timeLeftLabel } = computeStatus(r);
               const myVote = votesByMember[session.user.id];
+              const isDecided = status === "approved" || status === "rejected" || status === "expired";
 
               return (
                 <div className="card" key={r.id}>
@@ -745,13 +794,14 @@ export default function CassaComuneLive() {
                         }`}
                       >
                         {status === "pending"
-                          ? `In attesa${hoursLeft ? ` · scade tra ${hoursLeft}h` : ""}`
+                          ? `In attesa${timeLeftLabel ? ` · scade tra ${timeLeftLabel}` : ""}`
                           : status === "approved"
                           ? "Approvata"
                           : status === "expired"
                           ? "Scaduta"
                           : "Respinta"}
                       </span>
+                      {r.archived && <span className="archived-pill">Archiviata</span>}
                     </div>
                     <div className="req-amount mono">{currency(r.amount)}</div>
                   </div>
@@ -807,8 +857,17 @@ export default function CassaComuneLive() {
                   {status === "expired" && (
                     <div className="rejected-message">
                       <X size={15} />
-                      Richiesta scaduta dopo {REQUEST_TTL_HOURS} ore senza voto completo — il credito è
-                      stato liberato. Se serve ancora, invia una nuova richiesta.
+                      Richiesta scaduta senza voto completo entro il tempo previsto — il credito è stato
+                      liberato. Se serve ancora, invia una nuova richiesta.
+                    </div>
+                  )}
+
+                  {isDecided && !r.archived && (
+                    <div className="vote-actions">
+                      <button className="btn" onClick={() => archiveRequest(r.id)}>
+                        <Archive size={14} />
+                        Archivia
+                      </button>
                     </div>
                   )}
                 </div>
@@ -1084,6 +1143,10 @@ nav.tabs, .tabs{ display:flex; gap:8px; margin-bottom:22px; flex-wrap:wrap; }
 .status-approved{ color:var(--ok); border-color:var(--ok); }
 .status-rejected{ color:var(--bad); border-color:var(--bad); }
 .status-expired{ color:var(--muted); border-color:var(--line); }
+.archived-pill{
+  font-size:10px; text-transform:uppercase; color:var(--muted); border:1px solid var(--line);
+  padding:2px 8px; border-radius:999px; margin-left:6px;
+}
 .stamps-row{ display:flex; gap:10px; margin-top:14px; flex-wrap:wrap; }
 .stamp{
   width:38px; height:38px; border-radius:50%; border:2px solid; display:flex; align-items:center;
