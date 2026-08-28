@@ -22,7 +22,7 @@ import {
 // VERSIONE APP
 // =====================================================
 
-const APP_VERSION = "1.8.0";
+const APP_VERSION = "1.9.0";
 const BUILD_DATE = "2026-08-27";
 
 // Indirizzo pubblico del sito, usato nel link incluso nelle email di avviso
@@ -1320,6 +1320,12 @@ export default function CassaComuneLive() {
                         <div className="member-contact">
                           <Phone size={12} />
                           {m.phone}
+                        </div>
+                      )}
+                      {m.paypal_username && (
+                        <div className="member-contact">
+                          <Send size={12} />
+                          paypal.me/{m.paypal_username}
                         </div>
                       )}
                     </div>
