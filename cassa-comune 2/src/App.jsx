@@ -20,7 +20,7 @@ import {
 // VERSIONE APP
 // =====================================================
 
-const APP_VERSION = "1.2.0";
+const APP_VERSION = "1.2.1";
 const BUILD_DATE = "2026-08-27";
 
 // =====================================================
@@ -29,8 +29,8 @@ const BUILD_DATE = "2026-08-27";
 // Per provare velocemente la scadenza, cambia SOLO questa riga:
 // es. per testare con 30 secondi -> REQUEST_TTL_SECONDS = 30;
 // Per l'uso reale, rimettila a 24 ore -> REQUEST_TTL_SECONDS = 24 * 60 * 60;
-const REQUEST_TTL_SECONDS = 24 * 60 * 60; // 24 ore
-
+// const REQUEST_TTL_SECONDS = 24 * 60 * 60; // 24 ore
+const REQUEST_TTL_SECONDS = 60 ; // 1 minuto
 // Numero massimo di richieste aperte (in attesa, non scadute) per persona
 const MAX_OPEN_REQUESTS_PER_USER = 2;
 
