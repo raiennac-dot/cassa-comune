@@ -14,13 +14,14 @@ import {
   Mail,
   AlertCircle,
   Archive,
+  MessageCircle,
 } from "lucide-react";
 
 // =====================================================
 // VERSIONE APP
 // =====================================================
 
-const APP_VERSION = "1.3.2";
+const APP_VERSION = "1.5.0";
 const BUILD_DATE = "2026-08-27";
 
 // =====================================================
@@ -31,11 +32,11 @@ const BUILD_DATE = "2026-08-27";
 // Per l'uso reale, rimettila a 24 ore -> REQUEST_TTL_SECONDS = 24 * 60 * 60;
 // const REQUEST_TTL_SECONDS = 24 * 60 * 60; // 24 ore
 
-const REQUEST_TTL_SECONDS = 60; // sec
+const REQUEST_TTL_SECONDS = * 60; // sec.
 
 // Ogni quanti secondi il conto alla rovescia si aggiorna da solo a schermo
 // (non ricarica i dati dal database, ricalcola solo il tempo rimasto)
-const COUNTDOWN_REFRESH_SECONDS = 1;
+const COUNTDOWN_REFRESH_SECONDS = 5;
 
 // Numero massimo di richieste aperte (in attesa, non scadute) per persona
 const MAX_OPEN_REQUESTS_PER_USER = 2;
@@ -68,6 +69,16 @@ const dateFmt = (d) =>
     day: "2-digit",
     month: "short",
   });
+
+// Costruisce un link "wa.me" pronto all'uso per avvisare un componente
+// via WhatsApp. Ripulisce il numero da spazi/simboli, tenendo solo le cifre
+// (wa.me vuole il numero in formato internazionale senza "+" o spazi).
+function waLink(phone, message) {
+  if (!phone) return null;
+  const digitsOnly = phone.replace(/[^\d]/g, "");
+  if (!digitsOnly) return null;
+  return `https://wa.me/${digitsOnly}?text=${encodeURIComponent(message)}`;
+}
 
 // =====================================================
 // TIMBRO VOTO
@@ -109,7 +120,7 @@ export default function CassaComuneLive() {
 
   const [session, setSession] = useState(null);
   const [authMode, setAuthMode] = useState("login");
-  const [authForm, setAuthForm] = useState({ name: "", email: "", password: "" });
+  const [authForm, setAuthForm] = useState({ name: "", email: "", phone: "", password: "" });
   const [authError, setAuthError] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
 
@@ -164,6 +175,14 @@ export default function CassaComuneLive() {
   });
   const [inviteError, setInviteError] = useState("");
 
+  // ---------------------------------------------------
+  // MODIFICA PROFILO PERSONALE
+  // ---------------------------------------------------
+
+  const [profileForm, setProfileForm] = useState({ email: "", phone: "" });
+  const [profileError, setProfileError] = useState("");
+  const [profileSaving, setProfileSaving] = useState(false);
+
   // ===================================================
   // TOAST
   // ===================================================
@@ -178,6 +197,45 @@ export default function CassaComuneLive() {
   // ===================================================
 
   const currentMember = members.find((m) => m.id === session?.user?.id);
+
+  // Precompila il modulo "Il tuo profilo" con i dati già salvati, ogni
+  // volta che i membri vengono ricaricati.
+  useEffect(() => {
+    if (currentMember) {
+      setProfileForm({
+        email: currentMember.email || "",
+        phone: currentMember.phone || "",
+      });
+    }
+  }, [currentMember?.email, currentMember?.phone]);
+
+  async function saveProfile() {
+    setProfileError("");
+    setProfileSaving(true);
+
+    try {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/members?id=eq.${session.user.id}`, {
+        method: "PATCH",
+        headers: { ...authHeaders(session.access_token), Prefer: "return=representation" },
+        body: JSON.stringify({
+          email: profileForm.email.trim().toLowerCase() || null,
+          phone: profileForm.phone.trim() || null,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message || "Errore nel salvataggio del profilo.");
+      }
+
+      showToast("Profilo aggiornato.");
+      loadData();
+    } catch (err) {
+      setProfileError(err.message);
+    } finally {
+      setProfileSaving(false);
+    }
+  }
 
   // ===================================================
   // AUTENTICAZIONE
@@ -217,6 +275,22 @@ export default function CassaComuneLive() {
         }
 
         if (data.access_token) {
+          // Salva email e telefono sulla riga "members" già creata dal trigger
+          // (che imposta solo id, name, role al momento della registrazione).
+          try {
+            await fetch(`${SUPABASE_URL}/rest/v1/members?id=eq.${data.user.id}`, {
+              method: "PATCH",
+              headers: authHeaders(data.access_token),
+              body: JSON.stringify({
+                email: authForm.email.trim().toLowerCase(),
+                phone: authForm.phone.trim() || null,
+              }),
+            });
+          } catch {
+            // Non blocchiamo l'accesso se questo aggiornamento fallisce:
+            // l'utente potrà comunque aggiungere/correggere il numero dopo.
+          }
+
           setSession({ access_token: data.access_token, user: data.user });
         } else {
           setAuthError("Registrazione creata. Controlla la tua email se richiesta e poi accedi.");
@@ -622,6 +696,18 @@ export default function CassaComuneLive() {
                 />
               </label>
 
+              {authMode === "signup" && (
+                <label className="field">
+                  Telefono / WhatsApp (per ricevere avvisi voto)
+                  <input
+                    type="tel"
+                    placeholder="+39 333 1234567"
+                    value={authForm.phone}
+                    onChange={(e) => setAuthForm({ ...authForm, phone: e.target.value })}
+                  />
+                </label>
+              )}
+
               <label className="field">
                 Password
                 <input
@@ -855,6 +941,44 @@ export default function CassaComuneLive() {
                     </div>
                   )}
 
+                  {status === "pending" &&
+                    (() => {
+                      const waitingMembers = members.filter(
+                        (m) => m.id !== session.user.id && !votesByMember[m.id] && m.phone
+                      );
+                      if (waitingMembers.length === 0) return null;
+
+                      const message = `Ciao! C'è una richiesta di spesa da approvare su Cassa Comune: "${
+                        r.reason
+                      }" da ${currency(r.amount)}${
+                        timeLeftLabel ? ` (scade tra ${timeLeftLabel})` : ""
+                      }. Puoi votare quando vuoi dall'app.`;
+
+                      return (
+                        <div className="whatsapp-row">
+                          <span className="sub">Avvisa chi non ha ancora votato:</span>
+                          <div className="whatsapp-buttons">
+                            {waitingMembers.map((m) => {
+                              const link = waLink(m.phone, message);
+                              if (!link) return null;
+                              return (
+                                <a
+                                  key={m.id}
+                                  href={link}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="btn whatsapp-btn"
+                                >
+                                  <MessageCircle size={13} />
+                                  {m.name?.split(" ")[0]}
+                                </a>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })()}
+
                   {status === "pending" && myVote && (
                     <div className="voted-note">Hai già votato — in attesa degli altri componenti.</div>
                   )}
@@ -967,6 +1091,51 @@ export default function CassaComuneLive() {
         {/* COMPONENTI */}
         {view === "members" && (
           <div>
+            <div className="card">
+              <div className="section-title">
+                <Phone size={17} />
+                Il tuo profilo
+              </div>
+              <div className="sub" style={{ marginBottom: 15 }}>
+                Il tuo numero serve per ricevere gli avvisi WhatsApp quando c'è una richiesta da votare.
+              </div>
+
+              <div className="stack">
+                <label className="field">
+                  Email
+                  <input
+                    type="email"
+                    value={profileForm.email}
+                    onChange={(e) => setProfileForm({ ...profileForm, email: e.target.value })}
+                  />
+                </label>
+                <label className="field">
+                  Telefono / WhatsApp
+                  <input
+                    type="tel"
+                    placeholder="+39 333 1234567"
+                    value={profileForm.phone}
+                    onChange={(e) => setProfileForm({ ...profileForm, phone: e.target.value })}
+                  />
+                </label>
+                {profileError && (
+                  <div className="form-error">
+                    <AlertCircle size={14} />
+                    {profileError}
+                  </div>
+                )}
+                <button
+                  className="btn primary"
+                  style={{ alignSelf: "flex-start" }}
+                  onClick={saveProfile}
+                  disabled={profileSaving}
+                >
+                  <Check size={14} />
+                  {profileSaving ? "Salvataggio..." : "Salva profilo"}
+                </button>
+              </div>
+            </div>
+
             <div className="card">
               <div className="section-title">
                 <Users size={17} />
@@ -1166,6 +1335,12 @@ nav.tabs, .tabs{ display:flex; gap:8px; margin-bottom:22px; flex-wrap:wrap; }
   font-size:10px; text-transform:uppercase; color:var(--muted); border:1px solid var(--line);
   padding:2px 8px; border-radius:999px; margin-left:6px;
 }
+.whatsapp-row{ margin-top:14px; padding-top:12px; border-top:1px dashed var(--line); }
+.whatsapp-buttons{ display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+.whatsapp-btn{
+  text-decoration:none; border-color:#2FAE60; color:#4CD37B;
+}
+.whatsapp-btn:hover{ background:rgba(76,211,123,.08); }
 .stamps-row{ display:flex; gap:10px; margin-top:14px; flex-wrap:wrap; }
 .stamp{
   width:38px; height:38px; border-radius:50%; border:2px solid; display:flex; align-items:center;
