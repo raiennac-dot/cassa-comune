@@ -15,13 +15,14 @@ import {
   AlertCircle,
   Archive,
   MessageCircle,
+  Send,
 } from "lucide-react";
 
 // =====================================================
 // VERSIONE APP
 // =====================================================
 
-const APP_VERSION = "1.6.0";
+const APP_VERSION = "1.8.0";
 const BUILD_DATE = "2026-08-27";
 
 // Indirizzo pubblico del sito, usato nel link incluso nelle email di avviso
@@ -33,7 +34,7 @@ const APP_URL = "https://cassa-comune1.vercel.app";
 // Per provare velocemente la scadenza, cambia SOLO questa riga:
 // es. per testare con 30 secondi -> REQUEST_TTL_SECONDS = 30;
 // Per l'uso reale, rimettila a 24 ore -> REQUEST_TTL_SECONDS = 24 * 60 * 60;
-const REQUEST_TTL_SECONDS = 60; //  24 * 60 * 60; // 24 ore
+const REQUEST_TTL_SECONDS = 24 * 60 * 60; // 24 ore
 
 // Ogni quanti secondi il conto alla rovescia si aggiorna da solo a schermo
 // (non ricarica i dati dal database, ricalcola solo il tempo rimasto)
@@ -79,6 +80,17 @@ function waLink(phone, message) {
   const digitsOnly = phone.replace(/[^\d]/g, "");
   if (!digitsOnly) return null;
   return `https://wa.me/${digitsOnly}?text=${encodeURIComponent(message)}`;
+}
+
+// Costruisce un link paypal.me pronto all'uso, con importo già compilato.
+// L'utente (admin) lo apre e conferma l'invio con un tap dentro PayPal —
+// resta un "invio tra amici e parenti", quindi senza commissioni.
+function paypalMeLink(username, amount) {
+  if (!username) return null;
+  const clean = username.trim().replace(/^@/, "").replace(/^https?:\/\/(www\.)?paypal\.me\//i, "");
+  if (!clean) return null;
+  const amt = Number(amount || 0).toFixed(2);
+  return `https://paypal.me/${clean}/${amt}EUR`;
 }
 
 // =====================================================
@@ -133,6 +145,9 @@ export default function CassaComuneLive() {
   const [requests, setRequests] = useState([]);
   const [approvals, setApprovals] = useState([]);
   const [balance, setBalance] = useState(0);
+  const [balanceUpdatedAt, setBalanceUpdatedAt] = useState(null);
+  const [balanceInput, setBalanceInput] = useState("");
+  const [balanceSaving, setBalanceSaving] = useState(false);
   const [loadingData, setLoadingData] = useState(false);
   const [dataError, setDataError] = useState("");
 
@@ -180,7 +195,7 @@ export default function CassaComuneLive() {
   // MODIFICA PROFILO PERSONALE
   // ---------------------------------------------------
 
-  const [profileForm, setProfileForm] = useState({ email: "", phone: "" });
+  const [profileForm, setProfileForm] = useState({ email: "", phone: "", paypalUsername: "" });
   const [profileError, setProfileError] = useState("");
   const [profileSaving, setProfileSaving] = useState(false);
 
@@ -206,6 +221,7 @@ export default function CassaComuneLive() {
       setProfileForm({
         email: currentMember.email || "",
         phone: currentMember.phone || "",
+        paypalUsername: currentMember.paypal_username || "",
       });
     }
   }, [currentMember?.email, currentMember?.phone]);
@@ -221,6 +237,7 @@ export default function CassaComuneLive() {
         body: JSON.stringify({
           email: profileForm.email.trim().toLowerCase() || null,
           phone: profileForm.phone.trim() || null,
+          paypal_username: profileForm.paypalUsername.trim() || null,
         }),
       });
 
@@ -345,7 +362,7 @@ export default function CassaComuneLive() {
     setDataError("");
 
     try {
-      const [mRes, rRes, aRes] = await Promise.all([
+      const [mRes, rRes, aRes, bRes] = await Promise.all([
         fetch(`${SUPABASE_URL}/rest/v1/members?select=*`, {
           headers: authHeaders(session.access_token),
         }),
@@ -355,15 +372,24 @@ export default function CassaComuneLive() {
         fetch(`${SUPABASE_URL}/rest/v1/approvals?select=*`, {
           headers: authHeaders(session.access_token),
         }),
+        fetch(`${SUPABASE_URL}/rest/v1/balance_state?id=eq.1&select=*`, {
+          headers: authHeaders(session.access_token),
+        }),
       ]);
 
-      if (!mRes.ok || !rRes.ok || !aRes.ok) {
+      if (!mRes.ok || !rRes.ok || !aRes.ok || !bRes.ok) {
         throw new Error("Errore nel caricamento dei dati dal database.");
       }
 
       setMembers(await mRes.json());
       setRequests(await rRes.json());
       setApprovals(await aRes.json());
+
+      const balanceRows = await bRes.json();
+      if (balanceRows[0]) {
+        setBalance(Number(balanceRows[0].balance) || 0);
+        setBalanceUpdatedAt(balanceRows[0].updated_at || null);
+      }
     } catch (err) {
       setDataError(err.message || "Errore di connessione al database.");
     } finally {
@@ -569,6 +595,61 @@ export default function CassaComuneLive() {
     } catch (err) {
       console.error("ERRORE CREAZIONE MEMBRO:", err);
       setInviteError(err.message || "Errore nella creazione del componente.");
+    }
+  }
+
+  // ===================================================
+  // AGGIORNA SALDO CASSA (solo admin)
+  // ===================================================
+
+  async function saveBalance(newValue) {
+    setBalanceSaving(true);
+    try {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/balance_state?id=eq.1`, {
+        method: "PATCH",
+        headers: { ...authHeaders(session.access_token), Prefer: "return=representation" },
+        body: JSON.stringify({
+          balance: newValue,
+          updated_at: new Date().toISOString(),
+          updated_by: session.user.id,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message || "Errore nel salvataggio del saldo.");
+      }
+
+      showToast(`Saldo aggiornato a ${currency(newValue)}`);
+      loadData();
+    } catch (err) {
+      showToast(err.message);
+    } finally {
+      setBalanceSaving(false);
+    }
+  }
+
+  // ===================================================
+  // SEGNA COME PAGATA
+  // ===================================================
+
+  async function markAsPaid(requestId) {
+    try {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/requests?id=eq.${requestId}`, {
+        method: "PATCH",
+        headers: { ...authHeaders(session.access_token), Prefer: "return=representation" },
+        body: JSON.stringify({ paid: true }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message || "Errore nel segnare come pagata.");
+      }
+
+      showToast("Segnata come pagata.");
+      loadData();
+    } catch (err) {
+      showToast(err.message);
     }
   }
 
@@ -818,20 +899,36 @@ export default function CassaComuneLive() {
                 {currency(balance)} totale − {currency(lockedAmount)} impegnati
               </div>
             )}
-            <input
-              type="text"
-              inputMode="decimal"
-              placeholder="Aggiorna saldo..."
-              style={{ width: 160, marginTop: 6, fontSize: 12 }}
-              onBlur={(e) => {
-                const v = parseFloat(String(e.target.value).replace(",", "."));
-                if (!isNaN(v) && v >= 0) {
-                  setBalance(v);
-                  showToast(`Saldo aggiornato a ${currency(v)}`);
-                }
-                e.target.value = "";
-              }}
-            />
+            {balanceUpdatedAt && (
+              <div className="sub" style={{ marginTop: 2, fontSize: 10.5 }}>
+                Aggiornato il{" "}
+                {new Date(balanceUpdatedAt).toLocaleString("it-IT", {
+                  day: "2-digit",
+                  month: "short",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </div>
+            )}
+            {currentMember?.role === "admin" && (
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder="Aggiorna saldo totale..."
+                value={balanceInput}
+                disabled={balanceSaving}
+                style={{ width: 160, marginTop: 6, fontSize: 12 }}
+                onChange={(e) => setBalanceInput(e.target.value)}
+                onBlur={() => {
+                  if (!balanceInput) return;
+                  const v = parseFloat(String(balanceInput).replace(",", "."));
+                  if (!isNaN(v) && v >= 0) {
+                    saveBalance(v);
+                  }
+                  setBalanceInput("");
+                }}
+              />
+            )}
           </div>
         </header>
 
@@ -1015,6 +1112,38 @@ export default function CassaComuneLive() {
                     </div>
                   )}
 
+                  {status === "approved" &&
+                    !r.paid &&
+                    (() => {
+                      const payee = members.find((m) => m.id === r.requester_id);
+                      const link = paypalMeLink(payee?.paypal_username, r.amount);
+                      if (!link) {
+                        return (
+                          <div className="sub" style={{ marginTop: 8 }}>
+                            {payee?.name} non ha ancora salvato il proprio username paypal.me nel profilo.
+                          </div>
+                        );
+                      }
+                      return (
+                        <div className="vote-actions">
+                          <a href={link} target="_blank" rel="noopener noreferrer" className="btn primary">
+                            <Send size={14} />
+                            Invia {currency(r.amount)} a {payee?.name?.split(" ")[0]} su PayPal
+                          </a>
+                          <button className="btn" onClick={() => markAsPaid(r.id)}>
+                            <Check size={14} />
+                            Segna come pagato
+                          </button>
+                        </div>
+                      );
+                    })()}
+
+                  {status === "approved" && r.paid && (
+                    <div className="sub" style={{ marginTop: 8 }}>
+                      ✓ Pagamento già inviato.
+                    </div>
+                  )}
+
                   {status === "rejected" && (
                     <div className="rejected-message">
                       <X size={15} />
@@ -1141,6 +1270,15 @@ export default function CassaComuneLive() {
                     placeholder="+39 333 1234567"
                     value={profileForm.phone}
                     onChange={(e) => setProfileForm({ ...profileForm, phone: e.target.value })}
+                  />
+                </label>
+                <label className="field">
+                  Username paypal.me (senza "paypal.me/")
+                  <input
+                    type="text"
+                    placeholder="es. marcorossi"
+                    value={profileForm.paypalUsername}
+                    onChange={(e) => setProfileForm({ ...profileForm, paypalUsername: e.target.value })}
                   />
                 </label>
                 {profileError && (
