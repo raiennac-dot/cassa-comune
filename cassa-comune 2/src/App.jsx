@@ -22,7 +22,7 @@ import {
 // VERSIONE APP
 // =====================================================
 
-const APP_VERSION = "1.9.0";
+const APP_VERSION = "1.9.1";
 const BUILD_DATE = "2026-08-27";
 
 // Indirizzo pubblico del sito, usato nel link incluso nelle email di avviso
@@ -85,9 +85,19 @@ function waLink(phone, message) {
 // Costruisce un link paypal.me pronto all'uso, con importo già compilato.
 // L'utente (admin) lo apre e conferma l'invio con un tap dentro PayPal —
 // resta un "invio tra amici e parenti", quindi senza commissioni.
+// Ripulisce un nome utente paypal.me da eventuali prefissi che l'utente
+// potrebbe aver scritto per errore (https://, www., paypal.me/, @, ecc.)
+function cleanPaypalUsername(username) {
+  if (!username) return "";
+  return username
+    .trim()
+    .replace(/^@/, "")
+    .replace(/^(https?:\/\/)?(www\.)?paypal\.me\//i, "")
+    .replace(/\/+$/, "");
+}
+
 function paypalMeLink(username, amount) {
-  if (!username) return null;
-  const clean = username.trim().replace(/^@/, "").replace(/^https?:\/\/(www\.)?paypal\.me\//i, "");
+  const clean = cleanPaypalUsername(username);
   if (!clean) return null;
   const amt = Number(amount || 0).toFixed(2);
   return `https://paypal.me/${clean}/${amt}EUR`;
@@ -1325,7 +1335,7 @@ export default function CassaComuneLive() {
                       {m.paypal_username && (
                         <div className="member-contact">
                           <Send size={12} />
-                          paypal.me/{m.paypal_username}
+                          paypal.me/{cleanPaypalUsername(m.paypal_username)}
                         </div>
                       )}
                     </div>
